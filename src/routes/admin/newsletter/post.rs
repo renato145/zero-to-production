@@ -1,6 +1,6 @@
 use crate::domain::SubscriberEmail;
 use crate::email_client::EmailClient;
-use crate::idempotency_key::IdempotencyKey;
+use crate::idempotency::IdempotencyKey;
 use crate::session_state::TypedSession;
 use crate::utils::{e500, e400, see_other};
 use actix_web::{web, HttpResponse};
