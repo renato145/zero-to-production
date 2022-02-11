@@ -104,6 +104,87 @@ async fn newsletters_are_delivered_to_confirmed_subscribers() {
 }
 
 #[tokio::test]
+async fn newsletter_creation_is_idempotent() {
+    // Arrange
+    let app = spawn_app().await;
+    create_confirmed_subscriber(&app).await;
+    app.test_user.login(&app).await;
+
+    Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_server)
+        .await;
+
+    // Act - Part 1 - Submit newsletter form
+    let newsletter_request_body = serde_json::json!({
+        "title": "Newsletter title",
+        "text_content": "Newsletter body as plain text",
+        "html_content": "<p>Newsletter body as HTML</p>",
+        "idempotency_key": uuid::Uuid::new_v4().to_string()
+    });
+    let response = app.post_publish_newsletter(&newsletter_request_body).await;
+    assert_eq!(response.status().as_u16(), 303);
+    assert_eq!(
+        response.headers().get("Location").unwrap(),
+        "/admin/newsletters"
+    );
+
+    // Act - Part 2 - Follow the redirect
+    let response = app.get_publish_newsletter().await;
+    let html_page = response.text().await.unwrap();
+
+    // Act - Part 3 - Submit newsletter form **again**
+    let response = app.post_publish_newsletter(&newsletter_request_body).await;
+    assert_eq!(response.status().as_u16(), 303);
+    assert_eq!(
+        response.headers().get("Location").unwrap(),
+        "/admin/newsletters"
+    );
+
+    // Act - Part 4 - Follow the redirect
+    let response = app.get_publish_newsletter().await;
+    let html_page2 = response.text().await.unwrap();
+    assert_eq!(html_page, html_page2);
+
+    // Mock verifies on Drop that we have sent the newsletter email **once**
+}
+
+// #[tokio::test]
+// async fn concurrent_form_submission_is_handled_gracefully() {
+//     // Arrange
+//     let app = spawn_app().await;
+//     create_confirmed_subscriber(&app).await;
+//     app.test_user.login(&app).await;
+
+//     Mock::given(path("/email"))
+//         .and(method("POST"))
+//         // Setting a long delay to ensure that the second request 
+//         // arrives before the first one completes
+//         .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+//         .expect(1)
+//         .mount(&app.email_server)
+//         .await;
+
+//     // Act - Submit two newsletter forms concurrently
+//     let newsletter_request_body = serde_json::json!({
+//         "title": "Newsletter title",
+//         "text_content": "Newsletter body as plain text",
+//         "html_content": "<p>Newsletter body as HTML</p>",
+//         "idempotency_key": uuid::Uuid::new_v4().to_string()
+//     });
+//     let response1 = app.post_publish_newsletter(&newsletter_request_body);
+//     let response2 = app.post_publish_newsletter(&newsletter_request_body);
+//     let (response1, response2) = tokio::join!(response1, response2);
+
+//     assert_eq!(response1.status(), response2.status());
+//     assert_eq!(response1.text().await.unwrap(), response2.text().await.unwrap());
+
+//     // Mock verifies on Drop that we have sent the newsletter email **once**
+// }
+
+#[tokio::test]
 async fn you_must_be_logged_in_to_see_the_newsletter_form() {
     // Arrange
     let app = spawn_app().await;
