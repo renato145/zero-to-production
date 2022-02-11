@@ -1,7 +1,8 @@
 use crate::domain::SubscriberEmail;
 use crate::email_client::EmailClient;
+use crate::idempotency_key::IdempotencyKey;
 use crate::session_state::TypedSession;
-use crate::utils::{e500, see_other};
+use crate::utils::{e500, e400, see_other};
 use actix_web::{web, HttpResponse};
 use actix_web_flash_messages::FlashMessage;
 use anyhow::Context;
@@ -12,6 +13,7 @@ pub struct FormData {
     title: String,
     text_content: String,
     html_content: String,
+    idempotency_key: String,
 }
 
 #[tracing::instrument(
@@ -30,17 +32,19 @@ pub async fn publish_newsletter(
         return Ok(see_other("/login"));
     };
     tracing::Span::current().record("user_id", &tracing::field::display(&user_id.unwrap()));
+    let FormData {
+        title,
+        text_content,
+        html_content,
+        idempotency_key,
+    } = form.0;
+    let idempotency_key: IdempotencyKey = idempotency_key.try_into().map_err(e400)?;
     let subscribers = get_confirmed_subscribers(&pool).await.map_err(e500)?;
     for subscriber in subscribers {
         match subscriber {
             Ok(subscriber) => {
                 email_client
-                    .send_email(
-                        &subscriber.email,
-                        &form.title,
-                        &form.html_content,
-                        &form.text_content,
-                    )
+                    .send_email(&subscriber.email, &title, &html_content, &text_content)
                     .await
                     .with_context(|| {
                         format!("Failed to send newsletter issue to {}", subscriber.email)
