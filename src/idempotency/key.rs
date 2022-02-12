@@ -12,7 +12,8 @@ impl TryFrom<String> for IdempotencyKey {
         if s.len() >= max_length {
             anyhow::bail!(
                 "The idempotency key must be shorter than 
-                {max_length} characters");
+                {max_length} characters"
+            );
         }
         Ok(Self(s))
     }
@@ -21,5 +22,11 @@ impl TryFrom<String> for IdempotencyKey {
 impl Into<String> for IdempotencyKey {
     fn into(self) -> String {
         self.0
+    }
+}
+
+impl AsRef<str> for IdempotencyKey {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
