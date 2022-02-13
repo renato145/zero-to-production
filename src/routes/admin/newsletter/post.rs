@@ -1,9 +1,9 @@
+use crate::authentication::UserId;
 use crate::domain::SubscriberEmail;
 use crate::email_client::EmailClient;
 use crate::idempotency::{get_saved_response, IdempotencyKey};
-use crate::session_state::TypedSession;
 use crate::utils::{e400, e500, see_other};
-use actix_web::{error::InternalError, web, HttpResponse};
+use actix_web::{web, HttpResponse};
 use actix_web_flash_messages::FlashMessage;
 use anyhow::Context;
 use sqlx::PgPool;
@@ -16,30 +16,18 @@ pub struct FormData {
     idempotency_key: String,
 }
 
-async fn reject_anonymous_users(session: TypedSession) -> Result<uuid::Uuid, actix_web::Error> {
-    match session.get_user_id().map_err(e500)? {
-        Some(user_id) => Ok(user_id),
-        None => {
-            let response = see_other("/login");
-            let e = anyhow::anyhow!("The user has not logged in");
-            Err(InternalError::from_response(e, response).into())
-        }
-    }
-}
-
 #[tracing::instrument(
     name = "Publish a newsletter issue",
-    skip(form, session, pool, email_client),
-    fields(user_id=tracing::field::Empty)
+    skip_all,
+    fields(user_id=%&*user_id)
 )]
 pub async fn publish_newsletter(
     form: web::Form<FormData>,
-    session: TypedSession,
     pool: web::Data<PgPool>,
     email_client: web::Data<EmailClient>,
+    user_id: web::ReqData<UserId>
 ) -> Result<HttpResponse, actix_web::Error> {
-    let user_id = reject_anonymous_users(session).await?;
-    tracing::Span::current().record("user_id", &tracing::field::display(&user_id));
+    let user_id = user_id.into_inner();
     let FormData {
         title,
         text_content,
@@ -47,7 +35,7 @@ pub async fn publish_newsletter(
         idempotency_key,
     } = form.0;
     let idempotency_key: IdempotencyKey = idempotency_key.try_into().map_err(e400)?;
-    if let Some(saved_response) = get_saved_response(&pool, &idempotency_key, user_id)
+    if let Some(saved_response) = get_saved_response(&pool, &idempotency_key, *user_id)
         .await
         .map_err(e500)?
     {
