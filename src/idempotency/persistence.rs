@@ -1,36 +1,7 @@
 use super::IdempotencyKey;
-use actix_web::{http::StatusCode, HttpResponse};
-use sqlx::{postgres::PgHasArrayType, PgPool};
+use actix_web::{body::to_bytes, http::StatusCode, HttpResponse};
+use sqlx::{PgPool, postgres::PgHasArrayType};
 use uuid::Uuid;
-
-#[derive(Debug)]
-struct HttpResponseRecord {
-    status_code: i16,
-    headers: Vec<HeaderPairRecord>,
-    body: Vec<u8>,
-}
-
-impl sqlx::Type<sqlx::Postgres> for HttpResponseRecord {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("http_response")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for HttpResponseRecord {
-    fn decode(
-        value: sqlx::postgres::PgValueRef<'r>,
-    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        let status_code = decoder.try_decode::<i16>()?;
-        let headers = decoder.try_decode::<Vec<HeaderPairRecord>>()?;
-        let body = decoder.try_decode::<Vec<u8>>()?;
-        Ok(Self {
-            status_code,
-            headers,
-            body,
-        })
-    }
-}
 
 #[derive(Debug, sqlx::Type)]
 #[sqlx(type_name = "header_pair")]
@@ -53,7 +24,10 @@ pub async fn get_saved_response(
 ) -> Result<Option<HttpResponse>, anyhow::Error> {
     let saved_response = sqlx::query!(
         r#"
-        SELECT http_response as "http_response: HttpResponseRecord"
+        SELECT 
+            response_status_code, 
+            response_headers as "response_headers: Vec<HeaderPairRecord>",
+            response_body
         FROM idempotency
         WHERE 
           user_id = $1 AND
@@ -65,21 +39,56 @@ pub async fn get_saved_response(
     .fetch_optional(pool)
     .await?;
     if let Some(r) = saved_response {
-        let status_code = StatusCode::from_u16(r.http_response.status_code.try_into()?)?;
+        let status_code = StatusCode::from_u16(r.response_status_code.try_into()?)?;
         let mut response = HttpResponse::build(status_code);
-        for HeaderPairRecord { name, value } in r.http_response.headers {
+        for HeaderPairRecord { name, value } in r.response_headers {
             response.append_header((name, value));
         }
-        Ok(Some(response.body(r.http_response.body)))
+        Ok(Some(response.body(r.response_body)))
     } else {
         Ok(None)
     }
 }
 
 pub async fn save_response(
-    _pool: &PgPool,
-    _idempotency_key: &IdempotencyKey,
-    _user_id: Uuid,
-) -> Result<Option<HttpResponse>, anyhow::Error> {
-    todo!()
+    pool: &PgPool,
+    idempotency_key: &IdempotencyKey,
+    user_id: Uuid,
+    http_response: HttpResponse,
+) -> Result<HttpResponse, anyhow::Error> {
+    let (response_head, body) = http_response.into_parts();
+    let body = to_bytes(body).await.unwrap();
+    let status_code = response_head.status().as_u16() as i16;
+    let headers = {
+        let mut h = Vec::with_capacity(response_head.headers().len());
+        for (name, value) in response_head.headers().iter() {
+            let name = name.as_str().to_owned();
+            let value = value.as_bytes().to_owned();
+            h.push(HeaderPairRecord { name, value });
+        }
+        h
+    };
+
+    sqlx::query_unchecked!(
+        r#"
+        INSERT INTO idempotency (
+            user_id, 
+            idempotency_key, 
+            response_status_code, 
+            response_headers, 
+            response_body
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+        user_id,
+        idempotency_key.as_ref(),
+        status_code,
+        headers,
+        body.as_ref()
+    )
+    .execute(pool)
+    .await?;
+
+    let http_response = response_head.set_body(body).map_into_boxed_body();
+    Ok(http_response)
 }
