@@ -164,7 +164,7 @@ async fn concurrent_form_submission_is_handled_gracefully() {
 
     Mock::given(path("/email"))
         .and(method("POST"))
-        // Setting a long delay to ensure that the second request 
+        // Setting a long delay to ensure that the second request
         // arrives before the first one completes
         .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
         .expect(1)
@@ -183,7 +183,10 @@ async fn concurrent_form_submission_is_handled_gracefully() {
     let (response1, response2) = tokio::join!(response1, response2);
 
     assert_eq!(response1.status(), response2.status());
-    assert_eq!(response1.text().await.unwrap(), response2.text().await.unwrap());
+    assert_eq!(
+        response1.text().await.unwrap(),
+        response2.text().await.unwrap()
+    );
 
     // Mock verifies on Drop that we have sent the newsletter email **once**
 }

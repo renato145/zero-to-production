@@ -1,5 +1,5 @@
 use crate::session_state::TypedSession;
-use crate::utils::{see_other};
+use crate::utils::see_other;
 use actix_web::HttpResponse;
 use actix_web_flash_messages::FlashMessage;
 

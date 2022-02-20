@@ -19,9 +19,9 @@ impl TryFrom<String> for IdempotencyKey {
     }
 }
 
-impl Into<String> for IdempotencyKey {
-    fn into(self) -> String {
-        self.0
+impl From<IdempotencyKey> for String {
+    fn from(k: IdempotencyKey) -> Self {
+        k.0
     }
 }
 
