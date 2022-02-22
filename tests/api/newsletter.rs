@@ -4,7 +4,7 @@ use fake::faker::name::en::Name;
 use fake::Fake;
 use std::time::Duration;
 use wiremock::matchers::{any, method, path};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::{Mock, MockBuilder, ResponseTemplate};
 
 async fn create_unconfirmed_subscriber(app: &TestApp) -> ConfirmationLinks {
     let name: String = Name().fake();
@@ -199,6 +199,11 @@ async fn concurrent_form_submission_is_handled_gracefully() {
     // Mock verifies on Drop that we have sent the newsletter email **once**
 }
 
+// Short-hand for a common mocking setup
+fn when_sending_an_email() -> MockBuilder {
+    Mock::given(path("/email")).and(method("POST"))
+}
+
 #[tokio::test]
 async fn transient_errors_do_not_cause_duplicate_deliveries_on_retries() {
     // Arrange
@@ -215,15 +220,13 @@ async fn transient_errors_do_not_cause_duplicate_deliveries_on_retries() {
 
     // Part 1 - Submit newsletter form
     // Email delivery fails for the second subscriber
-    Mock::given(path("/email"))
-        .and(method("POST"))
+    when_sending_an_email()
         .respond_with(ResponseTemplate::new(200))
         .up_to_n_times(1)
         .expect(1)
         .mount(&app.email_server)
         .await;
-    Mock::given(path("/email"))
-        .and(method("POST"))
+    when_sending_an_email()
         .respond_with(ResponseTemplate::new(500))
         .up_to_n_times(1)
         .expect(1)
@@ -234,9 +237,8 @@ async fn transient_errors_do_not_cause_duplicate_deliveries_on_retries() {
     assert_eq!(response.status().as_u16(), 500);
 
     // Part 2 - Retry submitting the form
-    // Email delivery will succeed now
-    Mock::given(path("/email"))
-        .and(method("POST"))
+    // Email delivery will succeed for both subscribers now
+    when_sending_an_email()
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
         .named("Delivery retry")
