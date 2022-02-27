@@ -48,12 +48,14 @@ pub async fn publish_newsletter_form(
                 cols="50"
             ></textarea>
         </label>
+        <input hidden type="text" name="idempotency_key" value="{}">
         <br>
         <button type="submit">Publish</button>
     </form>
     <p><a href="/admin/dashboard">&lt;- Back</a></p>
 </body>
 </html>"#,
-            msg_html
+            msg_html,
+            uuid::Uuid::new_v4()
         )))
 }

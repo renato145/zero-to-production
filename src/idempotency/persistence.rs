@@ -33,9 +33,10 @@ pub async fn try_processing(
         r#"
         INSERT INTO idempotency (
             user_id, 
-            idempotency_key
+            idempotency_key,
+            created_at
         ) 
-        VALUES ($1, $2) 
+        VALUES ($1, $2, now()) 
         ON CONFLICT DO NOTHING
         "#,
         user_id,
